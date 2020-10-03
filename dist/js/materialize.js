@@ -1,5 +1,5 @@
 /*!
- * Materialize v1.0.0 (http://materializecss.com)
+ * Materialize vundefined (http://materializecss.com)
  * Copyright 2014-2017 Materialize
  * MIT License (https://raw.githubusercontent.com/Dogfalo/materialize/master/LICENSE)
  */
@@ -1225,6 +1225,23 @@ M.escapeHash = function (hash) {
   return hash.replace(/(:|\.|\[|\]|,|=|\/)/g, '\\$1');
 };
 
+/**
+ * Get closest ancestor that satisfies the condition
+ * @param {Element} el  Element to find ancestors on
+ * @param {Function} condition  Function that given an ancestor element returns true or false
+ * @returns {Element} Return closest ancestor or null if none satisfies the condition
+ */
+M.getClosestAncestor = function (el, condition) {
+  var ancestor = el.parentNode;
+  while (ancestor !== null && !$(ancestor).is(document)) {
+    if (condition(ancestor)) {
+      return ancestor;
+    }
+    ancestor = ancestor.parentNode;
+  }
+  return null;
+};
+
 M.elementOrParentIsFixed = function (element) {
   var $element = $(element);
   var $checkElements = $element.add($element.parents());
@@ -2290,11 +2307,7 @@ $jscomp.polyfill = function (e, r, p, m) {
       _this9.filterQuery = [];
 
       // Move dropdown-content after dropdown-trigger
-      if (!!_this9.options.container) {
-        $(_this9.options.container).append(_this9.dropdownEl);
-      } else {
-        _this9.$el.after(_this9.dropdownEl);
-      }
+      _this9._moveDropdown();
 
       _this9._makeDropdownFocusable();
       _this9._resetFilterQueryBound = _this9._resetFilterQuery.bind(_this9);
@@ -2564,6 +2577,20 @@ $jscomp.polyfill = function (e, r, p, m) {
           opacity: ''
         });
       }
+
+      // Move dropdown after container or trigger
+
+    }, {
+      key: "_moveDropdown",
+      value: function _moveDropdown(containerEl) {
+        if (!!this.options.container) {
+          $(this.options.container).append(this.dropdownEl);
+        } else if (containerEl) {
+          $(containerEl).append(this.dropdownEl);
+        } else {
+          this.$el.after(this.dropdownEl);
+        }
+      }
     }, {
       key: "_makeDropdownFocusable",
       value: function _makeDropdownFocusable() {
@@ -2586,7 +2613,7 @@ $jscomp.polyfill = function (e, r, p, m) {
       }
     }, {
       key: "_getDropdownPosition",
-      value: function _getDropdownPosition() {
+      value: function _getDropdownPosition(closestOverflowParent) {
         var offsetParentBRect = this.el.offsetParent.getBoundingClientRect();
         var triggerBRect = this.el.getBoundingClientRect();
         var dropdownBRect = this.dropdownEl.getBoundingClientRect();
@@ -2602,9 +2629,6 @@ $jscomp.polyfill = function (e, r, p, m) {
           height: idealHeight,
           width: idealWidth
         };
-
-        // Countainer here will be closest ancestor with overflow: hidden
-        var closestOverflowParent = !!this.dropdownEl.offsetParent ? this.dropdownEl.offsetParent : this.dropdownEl.parentNode;
 
         var alignments = M.checkPossibleAlignments(this.el, closestOverflowParent, dropdownBounds, this.options.coverTrigger ? 0 : triggerBRect.height);
 
@@ -2622,10 +2646,11 @@ $jscomp.polyfill = function (e, r, p, m) {
             this.isScrollable = true;
 
             // Determine which side has most space and cutoff at correct height
+            idealHeight -= 20; // Add padding when cutoff
             if (alignments.spaceOnTop > alignments.spaceOnBottom) {
               verticalAlignment = 'bottom';
               idealHeight += alignments.spaceOnTop;
-              idealYPos -= alignments.spaceOnTop;
+              idealYPos -= alignments.spaceOnTop - 20; // add back padding space
             } else {
               idealHeight += alignments.spaceOnBottom;
             }
@@ -2737,11 +2762,23 @@ $jscomp.polyfill = function (e, r, p, m) {
     }, {
       key: "_placeDropdown",
       value: function _placeDropdown() {
+        // Countainer here will be closest ancestor with overflow: hidden
+        var closestOverflowParent = M.getClosestAncestor(this.dropdownEl, function (ancestor) {
+          return $(ancestor).css('overflow') !== 'visible';
+        });
+        // Fallback
+        if (!closestOverflowParent) {
+          closestOverflowParent = !!this.dropdownEl.offsetParent ? this.dropdownEl.offsetParent : this.dropdownEl.parentNode;
+        }
+        if ($(closestOverflowParent).css('position') === 'static') $(closestOverflowParent).css('position', 'relative');
+
+        this._moveDropdown(closestOverflowParent);
+
         // Set width before calculating positionInfo
         var idealWidth = this.options.constrainWidth ? this.el.getBoundingClientRect().width : this.dropdownEl.getBoundingClientRect().width;
         this.dropdownEl.style.width = idealWidth + 'px';
 
-        var positionInfo = this._getDropdownPosition();
+        var positionInfo = this._getDropdownPosition(closestOverflowParent);
         this.dropdownEl.style.left = positionInfo.x + 'px';
         this.dropdownEl.style.top = positionInfo.y + 'px';
         this.dropdownEl.style.height = positionInfo.height + 'px';
@@ -5582,12 +5619,13 @@ $jscomp.polyfill = function (e, r, p, m) {
         this._handleCloseReleaseBound = this._handleCloseRelease.bind(this);
         this._handleCloseTriggerClickBound = this._handleCloseTriggerClick.bind(this);
 
-        this.dragTarget.addEventListener('touchmove', this._handleDragTargetDragBound);
-        this.dragTarget.addEventListener('touchend', this._handleDragTargetReleaseBound);
-        this._overlay.addEventListener('touchmove', this._handleCloseDragBound);
-        this._overlay.addEventListener('touchend', this._handleCloseReleaseBound);
-        this.el.addEventListener('touchmove', this._handleCloseDragBound);
-        this.el.addEventListener('touchend', this._handleCloseReleaseBound);
+        // Use passive event receivers to improve travel performance
+        this.dragTarget.addEventListener('touchmove', this._handleDragTargetDragBound, { passive: true });
+        this.dragTarget.addEventListener('touchend', this._handleDragTargetReleaseBound, { passive: true });
+        this._overlay.addEventListener('touchmove', this._handleCloseDragBound, { passive: true });
+        this._overlay.addEventListener('touchend', this._handleCloseReleaseBound, { passive: true });
+        this.el.addEventListener('touchmove', this._handleCloseDragBound, { passive: true });
+        this.el.addEventListener('touchend', this._handleCloseReleaseBound, { passive: true });
         this.el.addEventListener('click', this._handleCloseTriggerClickBound);
 
         // Add resize for side nav fixed
@@ -6784,11 +6822,6 @@ $jscomp.polyfill = function (e, r, p, m) {
         // Gather all matching data
         for (var key in data) {
           if (data.hasOwnProperty(key) && key.toLowerCase().indexOf(val) !== -1) {
-            // Break if past limit
-            if (this.count >= this.options.limit) {
-              break;
-            }
-
             var entry = {
               data: data[key],
               key: key
@@ -6806,6 +6839,9 @@ $jscomp.polyfill = function (e, r, p, m) {
           };
           matchingData.sort(sortFunctionBound);
         }
+
+        // Limit
+        matchingData = matchingData.slice(0, this.options.limit);
 
         // Render
         for (var i = 0; i < matchingData.length; i++) {
@@ -7921,7 +7957,7 @@ $jscomp.polyfill = function (e, r, p, m) {
       value: function _setupLabel() {
         this.$label = this.$el.find('label');
         if (this.$label.length) {
-          this.$label.setAttribute('for', this.$input.attr('id'));
+          this.$label[0].setAttribute('for', this.$input.attr('id'));
         }
       }
 
@@ -8212,11 +8248,14 @@ $jscomp.polyfill = function (e, r, p, m) {
       value: function destroy() {
         this.el.style.top = null;
         this._removePinClasses();
-        this._removeEventHandlers();
 
         // Remove pushpin Inst
         var index = Pushpin._pushpins.indexOf(this);
         Pushpin._pushpins.splice(index, 1);
+        if (Pushpin._pushpins.length === 0) {
+          this._removeEventHandlers();
+        }
+        this.el.M_Pushpin = undefined;
       }
     }, {
       key: "_setupEventHandlers",
@@ -11717,9 +11756,15 @@ $jscomp.polyfill = function (e, r, p, m) {
       key: "_handleOptionClick",
       value: function _handleOptionClick(e) {
         e.preventDefault();
-        var option = $(e.target).closest('li')[0];
-        var key = option.id;
-        if (!$(option).hasClass('disabled') && !$(option).hasClass('optgroup') && key.length) {
+        var optionEl = $(e.target).closest('li')[0];
+        this._selectOption(optionEl);
+        e.stopPropagation();
+      }
+    }, {
+      key: "_selectOption",
+      value: function _selectOption(optionEl) {
+        var key = optionEl.id;
+        if (!$(optionEl).hasClass('disabled') && !$(optionEl).hasClass('optgroup') && key.length) {
           var selected = true;
 
           if (this.isMultiple) {
@@ -11733,7 +11778,9 @@ $jscomp.polyfill = function (e, r, p, m) {
             selected = this._toggleEntryFromArray(key);
           } else {
             $(this.dropdownOptions).find('li').removeClass('selected');
-            $(option).toggleClass('selected', selected);
+            $(optionEl).toggleClass('selected', selected);
+            this._keysSelected = {};
+            this._keysSelected[optionEl.id] = true;
           }
 
           // Set selected on original select option
@@ -11745,7 +11792,9 @@ $jscomp.polyfill = function (e, r, p, m) {
           }
         }
 
-        e.stopPropagation();
+        if (!this.isMultiple) {
+          this.dropdown.close();
+        }
       }
 
       /**
@@ -11773,7 +11822,10 @@ $jscomp.polyfill = function (e, r, p, m) {
         this.wrapper = document.createElement('div');
         $(this.wrapper).addClass('select-wrapper ' + this.options.classes);
         this.$el.before($(this.wrapper));
-        this.wrapper.appendChild(this.el);
+        // Move actual select element into overflow hidden wrapper
+        var $hideSelect = $('<div class="hide-select"></div>');
+        $(this.wrapper).append($hideSelect);
+        $hideSelect[0].appendChild(this.el);
 
         if (this.el.disabled) {
           this.wrapper.classList.add('disabled');
@@ -11811,7 +11863,7 @@ $jscomp.polyfill = function (e, r, p, m) {
           });
         }
 
-        this.$el.after(this.dropdownOptions);
+        $(this.wrapper).append(this.dropdownOptions);
 
         // Add input dropdown
         this.input = document.createElement('input');
@@ -11823,16 +11875,17 @@ $jscomp.polyfill = function (e, r, p, m) {
           $(this.input).prop('disabled', 'true');
         }
 
-        this.$el.before(this.input);
+        $(this.wrapper).prepend(this.input);
         this._setValueToInput();
 
         // Add caret
         var dropdownIcon = $('<svg class="caret" height="24" viewBox="0 0 24 24" width="24" xmlns="http://www.w3.org/2000/svg"><path d="M7 10l5 5 5-5z"/><path d="M0 0h24v24H0z" fill="none"/></svg>');
-        this.$el.before(dropdownIcon[0]);
+        $(this.wrapper).prepend(dropdownIcon[0]);
 
         // Initialize dropdown
         if (!this.el.disabled) {
           var dropdownOptions = $.extend({}, this.options.dropdownOptions);
+          var userOnOpenEnd = dropdownOptions.onOpenEnd;
 
           // Add callback for centering selected option when dropdown content is scrollable
           dropdownOptions.onOpenEnd = function (el) {
@@ -11852,11 +11905,16 @@ $jscomp.polyfill = function (e, r, p, m) {
                 _this71.dropdownOptions.scrollTop = scrollOffset;
               }
             }
+
+            // Handle user declared onOpenEnd if needed
+            if (userOnOpenEnd && typeof userOnOpenEnd === 'function') {
+              userOnOpenEnd.call(_this71.dropdown, _this71.el);
+            }
           };
 
-          if (this.isMultiple) {
-            dropdownOptions.closeOnClick = false;
-          }
+          // Prevent dropdown from closeing too early
+          dropdownOptions.closeOnClick = false;
+
           this.dropdown = M.Dropdown.init(this.input, dropdownOptions);
         }
 
